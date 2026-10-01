@@ -94,3 +94,39 @@ async def test_mlsd_abort(pair_factory, Server):
         async for path, info in pair.client.list():
             await pair.client.abort()
             break
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("command", ["LIST", "MLSD", "RETR test.txt", "STOR upload.txt", "APPE upload.txt"])
+async def test_abort_before_data_connection(pair_factory, command):
+    async with pair_factory(do_quit=False) as pair:
+        await pair.make_server_files("test.txt")
+        await pair.client.command("EPSV", "229")
+        await pair.client.command(command, "150")
+        connection = next(iter(pair.server.connections.values()))
+        data_connection = connection["data_connection"]
+        assert not data_connection.done()
+        await pair.client.command("ABOR")
+        code, _ = await asyncio.wait_for(pair.client.parse_response(), 0.2)
+        assert str(code) == "426"
+        code, _ = await asyncio.wait_for(pair.client.parse_response(), 0.2)
+        assert str(code) == "226"
+        # The cancelled transfer must not poison readiness for a later transfer.
+        assert not data_connection.cancelled()
+        async with pair.client.download_stream("test.txt") as stream:
+            assert await stream.read() == b"-" * aioftp.DEFAULT_BLOCK_SIZE * 3
+        await pair.client.quit()
+
+
+@pytest.mark.asyncio
+async def test_data_connection_wait_timeout(pair_factory, Server):
+    async with pair_factory(None, Server(wait_future_timeout=0.02)) as pair:
+        await pair.make_server_files("test.txt")
+        await pair.client.command("EPSV", "229")
+        await pair.client.command("RETR test.txt", "150")
+        connection = next(iter(pair.server.connections.values()))
+        data_connection = connection["data_connection"]
+        await pair.client.command(None, "425")
+        assert not data_connection.cancelled()
+        async with pair.client.download_stream("test.txt") as stream:
+            assert await stream.read() == b"-" * aioftp.DEFAULT_BLOCK_SIZE * 3

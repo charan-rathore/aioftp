@@ -415,7 +415,7 @@ class ConnectionConditions:
             **kwargs: ConnectionConditionsParamSpec.kwargs,
         ) -> ConnectionConditionsReturnType | bool:
             futures = {connection[name]: msg for name, msg in self.fields}
-            aggregate = asyncio.gather(*futures)
+            aggregate = asyncio.gather(*(asyncio.shield(future) for future in futures))
             if self.wait:
                 timeout = connection.wait_future_timeout
             else:
@@ -426,6 +426,13 @@ class ConnectionConditions:
                     asyncio.shield(aggregate),
                     timeout,
                 )
+            except asyncio.CancelledError:
+                aggregate.cancel()
+                try:
+                    await aggregate
+                except asyncio.CancelledError:
+                    pass
+                raise
             except asyncio.TimeoutError:
                 for future, message in futures.items():
                     if not future.done():
@@ -1245,13 +1252,13 @@ class Server:
     @PathConditions(PathConditions.path_must_exists)
     @PathPermissions(PathPermissions.readable)
     async def mlsd(self, connection: Connection, rest: str | PurePosixPath) -> bool:
+        @worker
         @ConnectionConditions(
             ConnectionConditions.data_connection_made,
             wait=True,
             fail_code="425",
             fail_info="Can't open data connection",
         )
-        @worker
         async def mlsd_worker(self: "Server", connection: Connection, rest: str | PurePosixPath) -> bool:
             stream = connection.data_connection
             del connection.data_connection
@@ -1304,13 +1311,13 @@ class Server:
     @PathConditions(PathConditions.path_must_exists)
     @PathPermissions(PathPermissions.readable)
     async def list(self, connection: Connection, rest: str | PurePosixPath) -> bool:
+        @worker
         @ConnectionConditions(
             ConnectionConditions.data_connection_made,
             wait=True,
             fail_code="425",
             fail_info="Can't open data connection",
         )
-        @worker
         async def list_worker(self: "Server", connection: Connection, rest: str | PurePosixPath) -> bool:
             stream = connection.data_connection
             del connection.data_connection
@@ -1382,13 +1389,13 @@ class Server:
     )
     @PathPermissions(PathPermissions.writable)
     async def stor(self, connection: Connection, rest: str | PurePosixPath, mode: str = "wb") -> bool:
+        @worker
         @ConnectionConditions(
             ConnectionConditions.data_connection_made,
             wait=True,
             fail_code="425",
             fail_info="Can't open data connection",
         )
-        @worker
         async def stor_worker(self: "Server", connection: Connection, rest: str | PurePosixPath) -> bool:
             stream = connection.data_connection
             del connection.data_connection
@@ -1426,13 +1433,13 @@ class Server:
     )
     @PathPermissions(PathPermissions.readable)
     async def retr(self, connection: Connection, rest: str | PurePosixPath) -> bool:
+        @worker
         @ConnectionConditions(
             ConnectionConditions.data_connection_made,
             wait=True,
             fail_code="425",
             fail_info="Can't open data connection",
         )
-        @worker
         async def retr_worker(self: "Server", connection: Connection, rest: str | PurePosixPath) -> bool:
             stream = connection.data_connection
             del connection.data_connection
