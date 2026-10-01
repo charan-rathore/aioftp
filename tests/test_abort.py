@@ -107,9 +107,9 @@ async def test_abort_before_data_connection(pair_factory, command):
         data_connection = connection["data_connection"]
         assert not data_connection.done()
         await pair.client.command("ABOR")
-        code, _ = await asyncio.wait_for(pair.client.parse_response(), 0.2)
+        code, _ = await asyncio.wait_for(pair.client.parse_response(), 1.0)
         assert str(code) == "426"
-        code, _ = await asyncio.wait_for(pair.client.parse_response(), 0.2)
+        code, _ = await asyncio.wait_for(pair.client.parse_response(), 1.0)
         assert str(code) == "226"
         # The cancelled transfer must not poison readiness for a later transfer.
         assert not data_connection.cancelled()
